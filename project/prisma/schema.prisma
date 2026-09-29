@@ -1,0 +1,557 @@
+// VanDhan ScholarConnect — Prisma schema
+// Maps 1:1 onto the domain types in /types/index.ts so the frontend
+// can be rewired onto real API responses without changing shape.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum UserRole {
+  STUDENT
+  INSTITUTION_OFFICER
+  STATE_OFFICER
+  MOTA_OFFICER
+  HELPDESK_OFFICER
+  ADMIN
+}
+
+enum Language {
+  en
+  hi
+  gon
+}
+
+enum SchemeCode {
+  PRE_MATRIC
+  POST_MATRIC
+  TOP_CLASS
+  NFST
+  NOS
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  AUTO_VERIFICATION
+  ACTION_REQUIRED
+  INSTITUTION_REVIEW
+  STATE_REVIEW
+  MOTA_REVIEW
+  SANCTIONED
+  DBT_INITIATED
+  CREDITED
+  REJECTED
+  COMPLETED
+  NOT_STARTED
+  ELIGIBILITY_CHECK_REQUIRED
+}
+
+enum DocumentStatus {
+  VERIFIED
+  UPLOADED
+  ACTION_REQUIRED
+  EXPIRED
+  PENDING
+  REJECTED
+  OPTIONAL
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  MISMATCH
+  EXPIRED
+  UNAVAILABLE
+  MANUAL_REVIEW_REQUIRED
+  REJECTED
+}
+
+enum ConsentStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  CREDITED
+  DBT_INITIATED
+  PROCESSING
+  FAILED
+  PENDING
+}
+
+enum ReviewCaseStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  ESCALATED
+  PENDING
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum GrievanceStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum NotificationType {
+  DEFICIENCY
+  VERIFICATION
+  PAYMENT
+  ELIGIBILITY
+  CONSENT
+  CHATBOT
+  APPLICATION
+  GRIEVANCE
+}
+
+enum IntegrationStatus {
+  OPERATIONAL
+  MOCK_SANDBOX
+  DEGRADED
+  OFFLINE
+}
+
+enum EligibilityStatus {
+  ELIGIBLE_NOW
+  LIKELY_ELIGIBLE
+  NOT_ELIGIBLE_YET
+  POSSIBLE_CONFLICT
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+enum ChatRole {
+  user
+  bot
+}
+
+// ─────────────────────────────────────────────────────────────
+// Core identity
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  mobile    String   @unique
+  role      UserRole
+  name      String
+  state     String?
+  district  String?
+  language  Language @default(en)
+  textSize  String   @default("default")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  studentProfile   StudentProfile?
+  otpChallenges    OtpChallenge[]
+  sessions         Session[]
+  reviewsHandled   OfficerReviewCase[] @relation("ReviewedBy")
+  auditLogs        AuditLog[]
+  campaignsCreated OutreachCampaign[]
+  grievanceReplies GrievanceMessage[]
+
+  @@index([role])
+}
+
+model OtpChallenge {
+  id        String   @id @default(cuid())
+  userId    String?
+  mobile    String
+  otp       String
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([mobile])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Institution {
+  id       String  @id @default(cuid())
+  name     String
+  code     String  @unique
+  state    String
+  district String
+  type     String?
+
+  studentProfiles StudentProfile[]
+
+  @@index([state, district])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Student domain
+// ─────────────────────────────────────────────────────────────
+
+model StudentProfile {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  name                  String
+  age                   Int
+  gender                String
+  state                 String
+  district              String
+  category              String
+  mobile                String
+  apaarId               String   @unique
+  otrId                 String   @unique
+  aadhaarDisplay        String
+  bankDisplay           String
+  education             String
+  institutionId         String?
+  institutionName       String
+  familyIncome           Int
+  language              Language @default(en)
+  profileCompletion     Int      @default(0)
+  disabilityCertificate Boolean  @default(false)
+  netJrfQualified       Boolean  @default(false)
+  email                 String?
+  address               String?
+  guardianName          String?
+  guardianOccupation    String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution  Institution?  @relation(fields: [institutionId], references: [id])
+  applications ScholarshipApplication[]
+  documents    Document[]
+  payments     Payment[]
+  notifications Notification[]
+  consents     Consent[]
+  grievances   Grievance[]
+  chatSessions ChatSession[]
+
+  @@index([state, district])
+}
+
+model ScholarshipScheme {
+  code              SchemeCode @id
+  name              String
+  shortName         String
+  targetGroup       String
+  description       String
+  eligibility       String[]
+  documents         String[]
+  benefits          String
+  applicationPeriod String
+  stages            String[]
+  incomeThreshold   Int
+  icon              String
+  ruleVersion       String     @default("v1.0")
+  ruleStatus        String     @default("PUBLISHED")
+  rulesPublishedAt  DateTime   @default(now())
+
+  applications ScholarshipApplication[]
+  ruleVersions SchemeRuleVersion[]
+}
+
+model SchemeRuleVersion {
+  id            String     @id @default(cuid())
+  schemeCode    SchemeCode
+  version       String
+  rules         Json
+  publishedDate DateTime   @default(now())
+  status        String     @default("PUBLISHED")
+
+  scheme ScholarshipScheme @relation(fields: [schemeCode], references: [code])
+
+  @@index([schemeCode])
+}
+
+model ScholarshipApplication {
+  id             String            @id @default(cuid())
+  studentId      String
+  schemeCode     SchemeCode
+  status         ApplicationStatus @default(DRAFT)
+  submissionDate DateTime?
+  lastUpdated    DateTime          @updatedAt
+  amount         Int?
+  academicYear   String
+  formData       Json?
+  createdAt      DateTime          @default(now())
+
+  student             StudentProfile        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  scheme              ScholarshipScheme     @relation(fields: [schemeCode], references: [code])
+  timeline            TimelineEvent[]
+  verificationSummary VerificationItem[]
+  auditTrail          AuditEntry[]
+  reviewCase          OfficerReviewCase?
+  payments            Payment[]
+  grievances          Grievance[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+model TimelineEvent {
+  id            String   @id @default(cuid())
+  applicationId String
+  stage         String
+  status        String
+  date          DateTime?
+  description   String?
+  order         Int      @default(0)
+
+  application ScholarshipApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model VerificationItem {
+  id              String              @id @default(cuid())
+  applicationId   String
+  field           String
+  status          VerificationStatus  @default(PENDING)
+  applicationValue String?
+  sourceValue     String?
+  notes           String?
+  checkedAt       DateTime            @default(now())
+
+  application ScholarshipApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model AuditEntry {
+  id            String   @id @default(cuid())
+  applicationId String
+  timestamp     DateTime @default(now())
+  actor         String
+  action        String
+  details       String?
+
+  application ScholarshipApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model Document {
+  id           String         @id @default(cuid())
+  studentId    String
+  type         String
+  source       String
+  status       DocumentStatus @default(PENDING)
+  lastUpdated  DateTime       @updatedAt
+  expiryDate   DateTime?
+  verifiedBy   String?
+  fileName     String?
+  fileSize     String?
+  fileUrl      String?
+  createdAt    DateTime       @default(now())
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+model Consent {
+  id           String        @id @default(cuid())
+  studentId    String
+  source       String
+  dataTypes    String[]
+  purpose      String
+  grantedDate  DateTime      @default(now())
+  expiryDate   DateTime
+  status       ConsentStatus @default(ACTIVE)
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  studentId     String
+  applicationId String?
+  schemeCode    SchemeCode
+  academicYear  String
+  amount        Int
+  status        PaymentStatus @default(PENDING)
+  transactionRef String?
+  date          DateTime      @default(now())
+  sanctionRef   String?
+  component     String?
+  bankStatus    String?
+
+  student     StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  application ScholarshipApplication? @relation(fields: [applicationId], references: [id])
+
+  @@index([studentId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  studentId String
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  date      DateTime         @default(now())
+  actionUrl String?
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+model Grievance {
+  id            String          @id @default(cuid())
+  studentId     String
+  applicationId String?
+  category      String
+  subject       String
+  description   String
+  status        GrievanceStatus @default(OPEN)
+  createdAt     DateTime        @default(now())
+
+  student     StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  application ScholarshipApplication? @relation(fields: [applicationId], references: [id])
+  messages    GrievanceMessage[]
+
+  @@index([studentId])
+}
+
+model GrievanceMessage {
+  id          String   @id @default(cuid())
+  grievanceId String
+  from        String
+  authorId    String?
+  message     String
+  timestamp   DateTime @default(now())
+
+  grievance Grievance @relation(fields: [grievanceId], references: [id], onDelete: Cascade)
+  author    User?     @relation(fields: [authorId], references: [id])
+
+  @@index([grievanceId])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  studentId String
+  startedAt DateTime @default(now())
+
+  student  StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([studentId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      ChatRole
+  content   String
+  timestamp DateTime @default(now())
+  actions   Json?
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Officer domain
+// ─────────────────────────────────────────────────────────────
+
+model OfficerReviewCase {
+  id                      String            @id @default(cuid())
+  applicationId           String            @unique
+  studentName             String
+  scheme                  String
+  issue                   String
+  source                  String
+  createdDate             DateTime          @default(now())
+  sla                     String
+  priority                Priority          @default(MEDIUM)
+  status                  ReviewCaseStatus  @default(OPEN)
+  district                String
+  verificationComparison  Json
+  studentExplanation      String?
+  documents               Json
+  reviewedById            String?
+
+  application ScholarshipApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewedBy  User?                   @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([district])
+}
+
+model OutreachCampaign {
+  id          String         @id @default(cuid())
+  targetGroup String
+  language    String
+  message     String
+  createdAt   DateTime       @default(now())
+  status      CampaignStatus @default(DRAFT)
+  createdById String?
+
+  createdBy User? @relation(fields: [createdById], references: [id])
+}
+
+model OutreachInsight {
+  id                  String @id @default(cuid())
+  district            String @unique
+  enrolledStudents    Int
+  beneficiaries       Int
+  potentialEligible   Int
+  coveragePercentage  Int
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  actorId   String?
+  actor     String
+  role      UserRole
+  action    String
+  resource  String
+  metadata  String?
+  ipDevice  String?
+
+  actorUser User? @relation(fields: [actorId], references: [id])
+
+  @@index([timestamp])
+  @@index([role])
+}
+
+model IntegrationHealth {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  status      IntegrationStatus @default(MOCK_SANDBOX)
+  latency     Int               @default(0)
+  lastChecked DateTime          @updatedAt
+}
